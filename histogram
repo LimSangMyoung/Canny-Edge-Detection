@@ -1,0 +1,89 @@
+
+`timescale 1ns / 1ps
+// =====================================================================
+//  Histogram  (Otsu / Fig.11 of the paper)
+//
+//  - 256-entry RAM, 8-bit address (= NMS pixel value), 32-bit count.
+//  - Two phases:
+//      (1) statistics : for every valid pixel, read count, +1, write back.
+//                       counts IMG_SIZE pixels, then raises imhist_end.
+//      (2) readout    : streams count_0..count_255 in order on count_out
+//                       (one bin per cycle, dout_valid high), and clears
+//                       each bin to 0 as it is read so the RAM is
+//                       automatically re-armed for the next frame.
+//
+//  Combinational (async) read makes back-to-back same-bin pixels safe
+//  with NO forwarding logic: the +1 written at one edge is already
+//  visible at the read of the next edge.
+//
+//  Output #m of dout_valid (bin_addr == m) carries count of value m.
+// =====================================================================
+module histogram #(
+    parameter DW       = 8,           // pixel / address width
+    parameter CW       = 32,          // count (data) width
+    parameter IMG_SIZE = 512 * 512    // pixels per frame
+) (
+    input  wire          clk,
+    input  wire          rst_n,
+    input  wire          data_valid,
+    input  wire [DW-1:0] nms_data,
+    output reg           imhist_end,   // high once statistics are done
+    output reg           dout_valid,   // high during readout
+    output reg  [DW-1:0] bin_addr,     // index being streamed out
+    output reg  [CW-1:0] count_out     // count of that index
+);
+    localparam NBINS  = (1 << DW);              // 256
+    localparam PIX_CW = $clog2(IMG_SIZE + 1);
+
+    reg [CW-1:0] ram [0:NBINS-1];
+
+    reg              reading;   // 0 = statistics, 1 = readout
+    reg [PIX_CW-1:0] pix_cnt;   // processed-pixel counter
+    reg [DW:0]       rd_cnt;    // readout index (DW+1 bits, safe)
+
+    // address mux + async read
+    wire [DW-1:0] addr = reading ? rd_cnt[DW-1:0] : nms_data;
+    wire [CW-1:0] ram_q = ram[addr];
+
+    integer i;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            reading    <= 1'b0;
+            pix_cnt    <= {PIX_CW{1'b0}};
+            rd_cnt     <= {(DW+1){1'b0}};
+            imhist_end <= 1'b0;
+            dout_valid <= 1'b0;
+            bin_addr   <= {DW{1'b0}};
+            count_out  <= {CW{1'b0}};
+            for (i = 0; i < NBINS; i = i + 1)
+                ram[i] <= {CW{1'b0}};
+        end else if (!reading) begin
+            // ---------------- statistics phase ----------------
+            dout_valid <= 1'b0;
+            if (data_valid) begin
+                ram[addr] <= ram_q + 1'b1;          // read-modify-write
+                if (pix_cnt == IMG_SIZE - 1) begin  // last pixel of frame
+                    pix_cnt    <= {PIX_CW{1'b0}};
+                    rd_cnt     <= {(DW+1){1'b0}};
+                    reading    <= 1'b1;
+                    imhist_end <= 1'b1;
+                end else begin
+                    pix_cnt <= pix_cnt + 1'b1;
+                end
+            end
+        end else begin
+            // ---------------- readout phase -------------------
+            dout_valid <= 1'b1;
+            bin_addr   <= rd_cnt[DW-1:0];
+            count_out  <= ram_q;            // count of bin rd_cnt
+            ram[addr]  <= {CW{1'b0}};       // clear -> re-arm next frame
+            if (rd_cnt == NBINS - 1) begin
+                reading    <= 1'b0;
+                imhist_end <= 1'b0;
+                rd_cnt     <= {(DW+1){1'b0}};
+            end else begin
+                rd_cnt <= rd_cnt + 1'b1;
+            end
+        end
+    end
+endmodule
