@@ -14,14 +14,15 @@ Canny-Edge-Detection/
 │       └── output/                 # Canny edge detection 결과 이미지
 ├── rtl/                            # Verilog RTL 소스
 │   ├── canny_top.v                 # Top-level wrapper
-│   ├── ddr_interface.v             # DDR controller interface
-│   ├── input_buffer.v              # Input buffer module
+│   ├── axil_ctrl.sv                # AXI4-Lite control/status registers (PS interface)
+│   ├── ddr_interface.sv            # AXI master + buffer data-movement controller
+│   ├── input_buffer.sv             # DDR-read FIFO + unpacker -> 8-bit pixel stream
 │   ├── line_buffer.v               # Line buffer module
 │   ├── gaussian_filter.v           # Gaussian filter module
 │   ├── gradient_sobel.v            # Gradient computation (Sobel) module
 │   ├── nms.v                       # Non-Maximum Suppression module
 │   ├── hysteresis_threshold.v      # Hysteresis Thresholding module
-│   └── output_buffer.v             # Output buffer module
+│   └── output_buffer.sv            # Packer + DDR-write FIFO (hysteresis -> AXI)
 ├── bd/                             # Vivado Block Design (TCL export)
 ├── ip/                             # Custom IP 패키징 소스
 ├── tb/                             # Testbench files
